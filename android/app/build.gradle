@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.engine.minecraftclone'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.engine.minecraftclone"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++20"
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "../../CMakeLists.txt"
+        }
+    }
+
+    sourceSets {
+        main {
+            // تضمين مجلد الصور والشيدرات داخل الـ APK كـ Assets
+            assets.srcDirs = ['../../res']
+        }
+    }
+}
