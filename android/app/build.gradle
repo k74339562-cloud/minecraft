@@ -25,8 +25,24 @@ android {
         }
     }
 
+    // إعدادات التوقيع الرقمي للـ APK لضمان تثبيته على أي هاتف
+    signingConfigs {
+        debug {
+            storeFile file("${System.getProperty('user.home')}/.android/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
+            signingConfig signingConfigs.debug // يوقعه بنفس المفتاح حتى لو تم بناؤه Release
             minifyEnabled false
         }
     }
@@ -39,7 +55,6 @@ android {
 
     sourceSets {
         main {
-            // تضمين مجلد الصور والشيدرات داخل الـ APK كـ Assets
             assets.srcDirs = ['../../res']
         }
     }
