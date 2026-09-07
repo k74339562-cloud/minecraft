@@ -19,6 +19,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # إيقاف كاش Gradle
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
@@ -32,12 +33,14 @@ jobs:
         run: |
           sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
 
+      # تحميل مكتبة GLM
       - name: Download GLM Library
         run: |
           if [ ! -d "lib/glm" ]; then
             git clone --depth 1 https://github.com/g-truc/glm.git lib/glm
           fi
 
+      # تحميل مكتبة STB Image
       - name: Download STB Image Library
         run: |
           mkdir -p lib/stb
@@ -45,11 +48,16 @@ jobs:
             curl -s -L https://raw.githubusercontent.com/nothings/stb/master/stb_image.h -o lib/stb/stb_image.h
           fi
 
-      # تشغيل البناء الصريح والمباشر بدون أي إخفاء للأخطاء
+      # تشغيل البناء واستخراج نصوص الأخطاء بدقة إن وجدت
       - name: Build Android APK with Gradle
         run: |
           cd android
-          gradle clean assembleDebug --no-daemon --console=plain
+          if ! gradle clean assembleDebug --no-daemon --console=plain > build.log 2>&1; then
+            echo "====================== REAL COMPILER ERRORS ======================"
+            grep -C 2 "error:" build.log || tail -n 50 build.log
+            echo "=================================================================="
+            exit 1
+          fi
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
