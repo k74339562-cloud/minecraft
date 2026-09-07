@@ -51,11 +51,7 @@ bool ChunkSection::isFaceVisible(int x, int y, int z, Direction dir) const {
     if (isBlockOpaque(neighbor)) return false;
     if (isBlockOpaque(current) && !isBlockOpaque(neighbor)) return true;
 
-    // سر ماينكرافت Fancy: أوراق الشجر ترسم أوجهها الداخلية لتبدو الشجرة كثيفة وممتلئة!
-    if (current == BlockType::OakLeaves && neighbor == BlockType::OakLeaves) {
-        return true;
-    }
-
+    // حذف الوجه المشترك بين بلوكتين متطابقتين (يمنع تداخل أوراق الشجر والـ Z-Fighting نهائياً!)
     if (current == neighbor) return false;
 
     return true;
