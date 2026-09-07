@@ -19,11 +19,12 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # تثبيت ج Gradle تلقائياً للاستغناء عن ملف gradlew
+      # إيقاف الكاش لحذف التحذيرات المزعجة نهائياً
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.5'
+          cache-disabled: true
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -32,7 +33,14 @@ jobs:
         run: |
           sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
 
-      # البناء مباشرة باستخدام أمر gradle
+      # تحميل مكتبة GLM تلقائياً لحل مشكلة glm/glm.hpp
+      - name: Download GLM Library
+        run: |
+          if [ ! -d "lib/glm" ]; then
+            git clone --depth 1 https://github.com/g-truc/glm.git lib/glm
+          fi
+
+      # تشغيل البناء
       - name: Build Android APK with Gradle
         run: |
           cd android
