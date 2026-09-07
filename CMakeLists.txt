@@ -4,7 +4,6 @@ project(MinecraftClone LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# مسارات الترويسات الشاملة
 include_directories(
     include
     lib
@@ -14,23 +13,18 @@ include_directories(
     lib/glm
 )
 
-# تجميع كل ملفات الـ C++ تلقائياً من مجلد src مهما كانت تسميتها
-file(GLOB_RECURSE ALL_SOURCES "src/*.cpp")
-
-if (NOT ALL_SOURCES)
-    message(FATAL_ERROR "No .cpp source files found in 'src/'! Please make sure your source files are inside 'src/'.")
-endif()
+# ملفات المحرك الأساسية
+set(ENGINE_SOURCES
+    src/TextureArray.cpp
+    src/Shader.cpp
+    src/ChunkSection.cpp
+)
 
 # ==============================================================================
 # إعدادات البناء للأندرويد (Android NDK)
 # ==============================================================================
 if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
 
-    # استبعاد main.cpp الخاص بالكمبيوتر
-    set(ANDROID_SOURCES ${ALL_SOURCES})
-    list(FILTER ANDROID_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
-
-    # البحث التلقائي الدقيق عن ملف ربط الأندرويد داخل NDK
     find_file(GLUE_SRC
         NAMES android_native_app_glue.c
         PATHS
@@ -41,15 +35,12 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
             "/usr/local/lib/android/sdk/ndk/26.1.10909125/sources/android/native_app_glue"
     )
 
-    if (NOT GLUE_SRC)
-        message(FATAL_ERROR "Could not find android_native_app_glue.c in Android NDK!")
-    endif()
-
     get_filename_component(GLUE_DIR "${GLUE_SRC}" DIRECTORY)
 
-    # تجميع اللعبة مع كود الربط مباشرة
+    # تجميع ملفات المحرك مع android_main مباشرة
     add_library(${PROJECT_NAME} SHARED
-        ${ANDROID_SOURCES}
+        ${ENGINE_SOURCES}
+        src/android_main.cpp
         ${GLUE_SRC}
     )
 
@@ -75,14 +66,12 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
 # إعدادات البناء للكمبيوتر (Desktop PC)
 # ==============================================================================
 else()
-    set(DESKTOP_SOURCES ${ALL_SOURCES})
-    list(FILTER DESKTOP_SOURCES EXCLUDE REGEX ".*/android_main\\.cpp$")
-
     find_package(OpenGL REQUIRED)
     find_package(glfw3 3.3 REQUIRED)
 
     add_executable(${PROJECT_NAME}
-        ${DESKTOP_SOURCES}
+        ${ENGINE_SOURCES}
+        src/main.cpp
         lib/glad/src/glad.c
     )
 
