@@ -20,7 +20,6 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// خوارزمية توليد التضاريس الطبيعية لماينكرافت (2D Gradient Noise)
 static float hash2D(int x, int z) {
     int n = x + z * 57;
     n = (n << 13) ^ n;
@@ -182,7 +181,6 @@ static GLuint loadTexturesFromApk(AAssetManager* mgr) {
             }
             AAsset_close(asset);
         } else {
-            // صورة بديلة بحجم 16x16 إذا لم تكن موجودة
             std::vector<uint32_t> fallback(16 * 16, (i == 3 ? 0xFF888888 : 0xFF22AA22));
             glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, i, 16, 16, 1, GL_RGBA, GL_UNSIGNED_BYTE, fallback.data());
         }
@@ -243,7 +241,9 @@ static int initDisplay(Engine* engine) {
 
     glViewport(0, 0, engine->width, engine->height);
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
+
+    // سر الرؤية الممتلئة لأوراق الشجر: إيقاف CULL_FACE لتراها كثيفة من كل الجهات
+    glDisable(GL_CULL_FACE);
 
     GLuint vs = compileShaderSrc(GL_VERTEX_SHADER, VERTEX_SHADER_SRC);
     GLuint fs = compileShaderSrc(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
@@ -256,49 +256,51 @@ static int initDisplay(Engine* engine) {
 
     engine->textureArrayID = loadTexturesFromApk(engine->app->activity->assetManager);
 
-    // ==============================================================
-    // توليد الـ Chunk الحقيقي بتضاريس وطبقات ماينكرافت الطبيعية
-    // ==============================================================
     engine->chunk = new ChunkSection(0, 0, 0);
 
+    // 1. توليد التضاريس الطبيعية
     for (int x = 0; x < 16; ++x) {
         for (int z = 0; z < 16; ++z) {
             int h = getTerrainHeight(x, z);
 
             for (int y = 0; y <= h; ++y) {
                 if (y == h) {
-                    // السطح عشب أخضر دائماً
                     engine->chunk->setBlock(x, y, z, BlockType::Grass);
                 } else if (y >= h - 2) {
-                    // تحت العشب بطبقتين تراب نقي
                     engine->chunk->setBlock(x, y, z, BlockType::Dirt);
                 } else {
-                    // في الأعماق صخر صلب
                     engine->chunk->setBlock(x, y, z, BlockType::Stone);
                 }
             }
         }
     }
 
-    // زراعة شجرة طبيعية فوق إحدى تلال الـ Chunk (عند 8, z=8)
-    int treeBaseY = getTerrainHeight(8, 8) + 1;
-    // جذع الشجرة
-    engine->chunk->setBlock(8, treeBaseY, 8, BlockType::Dirt);
-    engine->chunk->setBlock(8, treeBaseY + 1, 8, BlockType::Dirt);
-    engine->chunk->setBlock(8, treeBaseY + 2, 8, BlockType::Dirt);
+    // 2. بناء شجرة ماينكرافت كلاسيكية عريضة وكثيفة
+    int tx = 8, tz = 8;
+    int ty = getTerrainHeight(tx, tz) + 1;
 
-    // أوراق الشجر حول القمة
+    // جذع الشجرة
+    engine->chunk->setBlock(tx, ty, tz, BlockType::Dirt);
+    engine->chunk->setBlock(tx, ty + 1, tz, BlockType::Dirt);
+    engine->chunk->setBlock(tx, ty + 2, tz, BlockType::Dirt);
+
+    // طبقة الأوراق السفلية (عرض 3x3)
     for (int ox = -1; ox <= 1; ++ox) {
         for (int oz = -1; oz <= 1; ++oz) {
-            engine->chunk->setBlock(8 + ox, treeBaseY + 2, 8 + oz, BlockType::OakLeaves);
-            engine->chunk->setBlock(8 + ox, treeBaseY + 3, 8 + oz, BlockType::OakLeaves);
+            engine->chunk->setBlock(tx + ox, ty + 2, tz + oz, BlockType::OakLeaves);
+            engine->chunk->setBlock(tx + ox, ty + 3, tz + oz, BlockType::OakLeaves);
         }
     }
-    engine->chunk->setBlock(8, treeBaseY + 4, 8, BlockType::OakLeaves);
+
+    // قمة الأوراق المتقاطعة (Cross pattern في الأعلى)
+    engine->chunk->setBlock(tx, ty + 4, tz, BlockType::OakLeaves);
+    engine->chunk->setBlock(tx + 1, ty + 4, tz, BlockType::OakLeaves);
+    engine->chunk->setBlock(tx - 1, ty + 4, tz, BlockType::OakLeaves);
+    engine->chunk->setBlock(tx, ty + 4, tz + 1, BlockType::OakLeaves);
+    engine->chunk->setBlock(tx, ty + 4, tz - 1, BlockType::OakLeaves);
 
     engine->chunk->buildMesh();
 
-    // ضبط الكاميرا بزاوية سينمائية لتشاهد الجبال والوديان بوضوح
     engine->camera.position = glm::vec3(8.0f, 16.0f, 26.0f);
     engine->camera.front = glm::normalize(glm::vec3(8.0f, 4.0f, 8.0f) - engine->camera.position);
 
