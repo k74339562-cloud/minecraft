@@ -1,4 +1,5 @@
 #include "ChunkSection.hpp"
+#include "World.hpp"
 #include <cstring>
 
 ChunkSection::ChunkSection(int chunkX, int chunkY, int chunkZ)
@@ -7,29 +8,26 @@ ChunkSection::ChunkSection(int chunkX, int chunkY, int chunkZ)
 }
 
 ChunkSection::~ChunkSection() {
-    if (m_vao != 0) glDeleteVertexArrays(1, &m_vao);
-    if (m_vbo != 0) glDeleteBuffers(1, &m_vbo);
+    if (m_opaqueVAO) glDeleteVertexArrays(1, &m_opaqueVAO);
+    if (m_opaqueVBO) glDeleteBuffers(1, &m_opaqueVBO);
+    if (m_waterVAO)  glDeleteVertexArrays(1, &m_waterVAO);
+    if (m_waterVBO)  glDeleteBuffers(1, &m_waterVBO);
 }
 
 void ChunkSection::setBlock(int x, int y, int z, BlockType type) {
     if (x < 0 || x >= SECTION_SIZE || y < 0 || y >= SECTION_SIZE || z < 0 || z >= SECTION_SIZE) return;
     int index = x + (y * SECTION_SIZE) + (z * SECTION_SIZE * SECTION_SIZE);
-    if (m_blocks[index] == BlockType::Air && type != BlockType::Air) {
-        m_nonAirCount++;
-    } else if (m_blocks[index] != BlockType::Air && type == BlockType::Air) {
-        m_nonAirCount--;
-    }
+    if (m_blocks[index] == BlockType::Air && type != BlockType::Air) m_nonAirCount++;
+    else if (m_blocks[index] != BlockType::Air && type == BlockType::Air) m_nonAirCount--;
     m_blocks[index] = type;
 }
 
 BlockType ChunkSection::getBlock(int x, int y, int z) const {
-    if (x < 0 || x >= SECTION_SIZE || y < 0 || y >= SECTION_SIZE || z < 0 || z >= SECTION_SIZE) {
-        return BlockType::Air;
-    }
+    if (x < 0 || x >= SECTION_SIZE || y < 0 || y >= SECTION_SIZE || z < 0 || z >= SECTION_SIZE) return BlockType::Air;
     return m_blocks[x + (y * SECTION_SIZE) + (z * SECTION_SIZE * SECTION_SIZE)];
 }
 
-bool ChunkSection::isFaceVisible(int x, int y, int z, Direction dir) const {
+bool ChunkSection::isFaceVisible(int x, int y, int z, Direction dir, const World* world) const {
     int nx = x, ny = y, nz = z;
     switch (dir) {
         case DIR_UP:    ny++; break;
@@ -40,15 +38,30 @@ bool ChunkSection::isFaceVisible(int x, int y, int z, Direction dir) const {
         case DIR_EAST:  nx++; break;
     }
 
-    if (nx < 0 || nx >= SECTION_SIZE || ny < 0 || ny >= SECTION_SIZE || nz < 0 || nz >= SECTION_SIZE) return true;
-
     BlockType current = getBlock(x, y, z);
-    BlockType neighbor = getBlock(nx, ny, nz);
+    BlockType neighbor;
+
+    // فحص الجار: داخل المقطع أو عبر حدود الـ Chunks المجاورة
+    if (nx >= 0 && nx < SECTION_SIZE && ny >= 0 && ny < SECTION_SIZE && nz >= 0 && nz < SECTION_SIZE) {
+        neighbor = getBlock(nx, ny, nz);
+    } else if (world != nullptr) {
+        int wx = m_chunkX * SECTION_SIZE + nx;
+        int wy = m_chunkY + ny;
+        int wz = m_chunkZ * SECTION_SIZE + nz;
+        neighbor = world->getBlock(wx, wy, wz);
+    } else {
+        return true;
+    }
 
     if (isBlockAir(neighbor)) return true;
     if (isBlockOpaque(neighbor)) return false;
+
+    // سر إخفاء جدران وحدود الـ Chunk في الماء:
+    if (isBlockWater(current) && isBlockWater(neighbor)) {
+        return false; // احذف الجدار المائي الفاصل بين الـ Chunks تماماً!
+    }
+
     if (current == BlockType::OakLeaves && neighbor == BlockType::OakLeaves) return true;
-    if (isBlockWater(current) && isBlockWater(neighbor)) return false;
     if (current == neighbor) return false;
 
     return true;
@@ -110,11 +123,13 @@ void ChunkSection::addFace(std::vector<PackedVertex>& vertices, int x, int y, in
     }
 }
 
-void ChunkSection::buildMesh() {
+void ChunkSection::buildMesh(const World* world) {
     if (isEmpty()) return;
 
-    std::vector<PackedVertex> vertices;
-    vertices.reserve(4096);
+    std::vector<PackedVertex> opaqueVerts;
+    std::vector<PackedVertex> waterVerts;
+    opaqueVerts.reserve(2048);
+    waterVerts.reserve(1024);
 
     for (int y = 0; y < SECTION_SIZE; ++y) {
         for (int z = 0; z < SECTION_SIZE; ++z) {
@@ -136,34 +151,55 @@ void ChunkSection::buildMesh() {
                     default: break;
                 }
 
-                if (isFaceVisible(x, y, z, DIR_UP))    addFace(vertices, x, y, z, DIR_UP, topTex);
-                if (isFaceVisible(x, y, z, DIR_DOWN))  addFace(vertices, x, y, z, DIR_DOWN, bottomTex);
-                if (isFaceVisible(x, y, z, DIR_NORTH)) addFace(vertices, x, y, z, DIR_NORTH, sideTex);
-                if (isFaceVisible(x, y, z, DIR_SOUTH)) addFace(vertices, x, y, z, DIR_SOUTH, sideTex);
-                if (isFaceVisible(x, y, z, DIR_WEST))  addFace(vertices, x, y, z, DIR_WEST, sideTex);
-                if (isFaceVisible(x, y, z, DIR_EAST))  addFace(vertices, x, y, z, DIR_EAST, sideTex);
+                auto& targetList = (block == BlockType::Water) ? waterVerts : opaqueVerts;
+
+                if (isFaceVisible(x, y, z, DIR_UP, world))    addFace(targetList, x, y, z, DIR_UP, topTex);
+                if (isFaceVisible(x, y, z, DIR_DOWN, world))  addFace(targetList, x, y, z, DIR_DOWN, bottomTex);
+                if (isFaceVisible(x, y, z, DIR_NORTH, world)) addFace(targetList, x, y, z, DIR_NORTH, sideTex);
+                if (isFaceVisible(x, y, z, DIR_SOUTH, world)) addFace(targetList, x, y, z, DIR_SOUTH, sideTex);
+                if (isFaceVisible(x, y, z, DIR_WEST, world))  addFace(targetList, x, y, z, DIR_WEST, sideTex);
+                if (isFaceVisible(x, y, z, DIR_EAST, world))  addFace(targetList, x, y, z, DIR_EAST, sideTex);
             }
         }
     }
 
-    m_vertexCount = static_cast<GLsizei>(vertices.size());
-    if (m_vertexCount == 0) return;
+    // 1. رفع مش البلوكات الصلبة
+    m_opaqueCount = static_cast<GLsizei>(opaqueVerts.size());
+    if (m_opaqueCount > 0) {
+        if (!m_opaqueVAO) glGenVertexArrays(1, &m_opaqueVAO);
+        if (!m_opaqueVBO) glGenBuffers(1, &m_opaqueVBO);
+        glBindVertexArray(m_opaqueVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, m_opaqueVBO);
+        glBufferData(GL_ARRAY_BUFFER, opaqueVerts.size() * sizeof(PackedVertex), opaqueVerts.data(), GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), (void*)0);
+        glBindVertexArray(0);
+    }
 
-    if (m_vao == 0) glGenVertexArrays(1, &m_vao);
-    if (m_vbo == 0) glGenBuffers(1, &m_vbo);
+    // 2. رفع مش الماء الشفاف المنفصل
+    m_waterCount = static_cast<GLsizei>(waterVerts.size());
+    if (m_waterCount > 0) {
+        if (!m_waterVAO) glGenVertexArrays(1, &m_waterVAO);
+        if (!m_waterVBO) glGenBuffers(1, &m_waterVBO);
+        glBindVertexArray(m_waterVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, m_waterVBO);
+        glBufferData(GL_ARRAY_BUFFER, waterVerts.size() * sizeof(PackedVertex), waterVerts.data(), GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), (void*)0);
+        glBindVertexArray(0);
+    }
+}
 
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(PackedVertex), vertices.data(), GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), (void*)0);
+void ChunkSection::renderOpaque() const {
+    if (m_opaqueCount == 0 || !m_opaqueVAO) return;
+    glBindVertexArray(m_opaqueVAO);
+    glDrawArrays(GL_TRIANGLES, 0, m_opaqueCount);
     glBindVertexArray(0);
 }
 
-void ChunkSection::render() const {
-    if (m_vertexCount == 0 || m_vao == 0) return;
-    glBindVertexArray(m_vao);
-    glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
+void ChunkSection::renderWater() const {
+    if (m_waterCount == 0 || !m_waterVAO) return;
+    glBindVertexArray(m_waterVAO);
+    glDrawArrays(GL_TRIANGLES, 0, m_waterCount);
     glBindVertexArray(0);
 }
