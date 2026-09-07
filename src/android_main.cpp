@@ -56,6 +56,9 @@ static int getTerrainHeight(int x, int z) {
     return h;
 }
 
+// -------------------------------------------------------------
+// شيدرات البلوكات (العالم)
+// -------------------------------------------------------------
 const char* VERTEX_SHADER_SRC = R"(#version 300 es
 layout (location = 0) in uint aPackedData;
 
@@ -75,12 +78,7 @@ const vec2 UV_CORNERS[4] = vec2[4](
 );
 
 const float FACE_LIGHT[6] = float[6](
-    1.0,  // UP
-    0.5,  // DOWN
-    0.8,  // NORTH
-    0.8,  // SOUTH
-    0.6,  // WEST
-    0.6   // EAST
+    1.0, 0.5, 0.8, 0.8, 0.6, 0.6
 );
 
 void main() {
@@ -116,14 +114,46 @@ out vec4 FragColor;
 
 void main() {
     vec4 texColor = texture(uTextureArray, vec3(vTexCoord, float(vLayer)));
-
-    if (texColor.a < 0.5) {
-        discard;
-    }
-
+    if (texColor.a < 0.5) discard;
     FragColor = vec4(texColor.rgb * vLight, texColor.a);
 }
 )";
+
+// -------------------------------------------------------------
+// شيدرات الغيوم 3D (شبه شفافة وظلال طبيعية)
+// -------------------------------------------------------------
+const char* CLOUD_VERT_SRC = R"(#version 300 es
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec4 aColor;
+
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProjection;
+
+out vec4 vColor;
+
+void main() {
+    vColor = aColor;
+    gl_Position = uProjection * uView * uModel * vec4(aPos, 1.0);
+}
+)";
+
+const char* CLOUD_FRAG_SRC = R"(#version 300 es
+precision mediump float;
+
+in vec4 vColor;
+out vec4 FragColor;
+
+void main() {
+    FragColor = vColor;
+}
+)";
+
+// فيرتكس خاص بالغيوم
+struct CloudVertex {
+    glm::vec3 pos;
+    glm::vec4 color;
+};
 
 struct Engine {
     struct android_app* app;
@@ -134,20 +164,130 @@ struct Engine {
     int32_t height = 0;
     bool animating = false;
 
-    GLuint shaderProgram = 0;
+    GLuint blockShader = 0;
+    GLuint cloudShader = 0;
     GLuint textureArrayID = 0;
+
     ChunkSection* chunk = nullptr;
+
+    // بيانات مجسم الغيوم 3D
+    GLuint cloudVAO = 0;
+    GLuint cloudVBO = 0;
+    GLsizei cloudVertexCount = 0;
+
     Camera camera;
     float rotationAngle = 0.0f;
+    float windOffset = 0.0f;
 };
+
+// توليد شبكة الغيوم ثلاثية الأبعاد بأسلوب ماينكرافت
+static void buildCloudMesh(Engine* engine) {
+    std::vector<CloudVertex> vertices;
+
+    constexpr int GRID = 24;          // أبعاد شبكة السحاب 24x24
+    constexpr float CELL = 3.5f;       // حجم كتلة السحاب الواحدة
+    constexpr float BASE_Y = 18.0f;    // ارتفاع السحاب في السماء
+    constexpr float THICKNESS = 1.8f;  // سُمك السحاب 3D
+
+    auto hasCloud = [](int x, int z) {
+        float n = smoothNoise(x * 0.2f + 5.0f, z * 0.2f + 5.0f);
+        return n > 0.40f; // عتبة تكوين السحب
+    };
+
+    // ألوان الغيوم مع الظلال والشفافية (Alpha = 0.82)
+    const glm::vec4 colTop    = glm::vec4(1.0f, 1.0f, 1.0f, 0.85f);       // السطح أبيض ناصع
+    const glm::vec4 colBottom = glm::vec4(0.72f, 0.75f, 0.82f, 0.80f);   // القاع رمادي مظلل
+    const glm::vec4 colSideX  = glm::vec4(0.88f, 0.90f, 0.95f, 0.82f);   // الجوانب
+    const glm::vec4 colSideZ  = glm::vec4(0.80f, 0.83f, 0.88f, 0.82f);
+
+    float offset = (GRID * CELL) * 0.5f;
+
+    for (int z = 0; z < GRID; ++z) {
+        for (int x = 0; x < GRID; ++x) {
+            if (!hasCloud(x, z)) continue;
+
+            float x0 = (x * CELL) - offset;
+            float x1 = x0 + CELL;
+            float z0 = (z * CELL) - offset;
+            float z1 = z0 + CELL;
+            float y0 = BASE_Y;
+            float y1 = BASE_Y + THICKNESS;
+
+            // 1. الوجه السفلي (Bottom Face)
+            vertices.push_back({ {x0, y0, z0}, colBottom });
+            vertices.push_back({ {x1, y0, z0}, colBottom });
+            vertices.push_back({ {x1, y0, z1}, colBottom });
+            vertices.push_back({ {x1, y0, z1}, colBottom });
+            vertices.push_back({ {x0, y0, z1}, colBottom });
+            vertices.push_back({ {x0, y0, z0}, colBottom });
+
+            // 2. الوجه العلوي (Top Face)
+            vertices.push_back({ {x0, y1, z1}, colTop });
+            vertices.push_back({ {x1, y1, z1}, colTop });
+            vertices.push_back({ {x1, y1, z0}, colTop });
+            vertices.push_back({ {x1, y1, z0}, colTop });
+            vertices.push_back({ {x0, y1, z0}, colTop });
+            vertices.push_back({ {x0, y1, z1}, colTop });
+
+            // 3. الجوانب مع Face Culling (لا ترسم الجدار إلا إذا كان الجار فارغاً)
+            if (z == 0 || !hasCloud(x, z - 1)) { // North
+                vertices.push_back({ {x1, y0, z0}, colSideZ });
+                vertices.push_back({ {x0, y0, z0}, colSideZ });
+                vertices.push_back({ {x0, y1, z0}, colSideZ });
+                vertices.push_back({ {x0, y1, z0}, colSideZ });
+                vertices.push_back({ {x1, y1, z0}, colSideZ });
+                vertices.push_back({ {x1, y0, z0}, colSideZ });
+            }
+            if (z == GRID - 1 || !hasCloud(x, z + 1)) { // South
+                vertices.push_back({ {x0, y0, z1}, colSideZ });
+                vertices.push_back({ {x1, y0, z1}, colSideZ });
+                vertices.push_back({ {x1, y1, z1}, colSideZ });
+                vertices.push_back({ {x1, y1, z1}, colSideZ });
+                vertices.push_back({ {x0, y1, z1}, colSideZ });
+                vertices.push_back({ {x0, y0, z1}, colSideZ });
+            }
+            if (x == 0 || !hasCloud(x - 1, z)) { // West
+                vertices.push_back({ {x0, y0, z0}, colSideX });
+                vertices.push_back({ {x0, y0, z1}, colSideX });
+                vertices.push_back({ {x0, y1, z1}, colSideX });
+                vertices.push_back({ {x0, y1, z1}, colSideX });
+                vertices.push_back({ {x0, y1, z0}, colSideX });
+                vertices.push_back({ {x0, y0, z0}, colSideX });
+            }
+            if (x == GRID - 1 || !hasCloud(x + 1, z)) { // East
+                vertices.push_back({ {x1, y0, z1}, colSideX });
+                vertices.push_back({ {x1, y0, z0}, colSideX });
+                vertices.push_back({ {x1, y1, z0}, colSideX });
+                vertices.push_back({ {x1, y1, z0}, colSideX });
+                vertices.push_back({ {x1, y1, z1}, colSideX });
+                vertices.push_back({ {x1, y0, z1}, colSideX });
+            }
+        }
+    }
+
+    engine->cloudVertexCount = static_cast<GLsizei>(vertices.size());
+
+    glGenVertexArrays(1, &engine->cloudVAO);
+    glGenBuffers(1, &engine->cloudVBO);
+
+    glBindVertexArray(engine->cloudVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, engine->cloudVBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(CloudVertex), vertices.data(), GL_STATIC_DRAW);
+
+    // موقع الرؤوس (Position)
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(CloudVertex), (void*)offsetof(CloudVertex, pos));
+
+    // ألوان وظلال الرؤوس (Color)
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(CloudVertex), (void*)offsetof(CloudVertex, color));
+
+    glBindVertexArray(0);
+}
 
 static GLuint loadTexturesFromApk(AAssetManager* mgr) {
     std::vector<std::string> textureNames = {
-        "grass_block_top.png",   // Layer 0
-        "grass_block_side.png",  // Layer 1
-        "dirt.png",              // Layer 2
-        "stone.png",             // Layer 3
-        "oak_leaves.png"         // Layer 4
+        "grass_block_top.png", "grass_block_side.png", "dirt.png", "stone.png", "oak_leaves.png"
     };
 
     GLuint texID = 0;
@@ -161,23 +301,17 @@ static GLuint loadTexturesFromApk(AAssetManager* mgr) {
 
     for (int i = 0; i < layerCount; ++i) {
         std::string filename = textureNames[i];
-        
         AAsset* asset = AAssetManager_open(mgr, ("textures/blocks/" + filename).c_str(), AASSET_MODE_BUFFER);
-        if (!asset) {
-            asset = AAssetManager_open(mgr, ("res/textures/blocks/" + filename).c_str(), AASSET_MODE_BUFFER);
-        }
+        if (!asset) asset = AAssetManager_open(mgr, ("res/textures/blocks/" + filename).c_str(), AASSET_MODE_BUFFER);
 
         if (asset) {
             size_t size = AAsset_getLength(asset);
             const void* buffer = AAsset_getBuffer(asset);
-
             int w, h, channels;
             unsigned char* data = stbi_load_from_memory((const unsigned char*)buffer, (int)size, &w, &h, &channels, 4);
-
             if (data) {
                 glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, i, w, h, 1, GL_RGBA, GL_UNSIGNED_BYTE, data);
                 stbi_image_free(data);
-                LOGI("Loaded %s to Layer %d", filename.c_str(), i);
             }
             AAsset_close(asset);
         } else {
@@ -195,22 +329,30 @@ static GLuint loadTexturesFromApk(AAssetManager* mgr) {
     return texID;
 }
 
-static GLuint compileShaderSrc(GLenum type, const char* src) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &src, nullptr);
-    glCompileShader(shader);
-    return shader;
+static GLuint compileProgram(const char* vsSrc, const char* fsSrc) {
+    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vs, 1, &vsSrc, nullptr);
+    glCompileShader(vs);
+
+    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fs, 1, &fsSrc, nullptr);
+    glCompileShader(fs);
+
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vs);
+    glAttachShader(prog, fs);
+    glLinkProgram(prog);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    return prog;
 }
 
 static int initDisplay(Engine* engine) {
     const EGLint attribs[] = {
         EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_BLUE_SIZE, 8,
-        EGL_GREEN_SIZE, 8,
-        EGL_RED_SIZE, 8,
-        EGL_DEPTH_SIZE, 24,
-        EGL_NONE
+        EGL_BLUE_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_RED_SIZE, 8,
+        EGL_DEPTH_SIZE, 24, EGL_NONE
     };
 
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -221,16 +363,10 @@ static int initDisplay(Engine* engine) {
     eglChooseConfig(display, attribs, &config, 1, &numConfigs);
 
     EGLSurface surface = eglCreateWindowSurface(display, config, engine->app->window, nullptr);
-    const EGLint contextAttribs[] = {
-        EGL_CONTEXT_CLIENT_VERSION, 3,
-        EGL_NONE
-    };
+    const EGLint contextAttribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
     EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs);
 
-    if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE) {
-        LOGE("Unable to eglMakeCurrent");
-        return -1;
-    }
+    if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE) return -1;
 
     eglQuerySurface(display, surface, EGL_WIDTH, &engine->width);
     eglQuerySurface(display, surface, EGL_HEIGHT, &engine->height);
@@ -241,58 +377,39 @@ static int initDisplay(Engine* engine) {
 
     glViewport(0, 0, engine->width, engine->height);
     glEnable(GL_DEPTH_TEST);
-
-    // سر الرؤية الممتلئة لأوراق الشجر: إيقاف CULL_FACE لتراها كثيفة من كل الجهات
     glDisable(GL_CULL_FACE);
 
-    GLuint vs = compileShaderSrc(GL_VERTEX_SHADER, VERTEX_SHADER_SRC);
-    GLuint fs = compileShaderSrc(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
-    engine->shaderProgram = glCreateProgram();
-    glAttachShader(engine->shaderProgram, vs);
-    glAttachShader(engine->shaderProgram, fs);
-    glLinkProgram(engine->shaderProgram);
-    glDeleteShader(vs);
-    glDeleteShader(fs);
+    // تجميع الشيدرات
+    engine->blockShader = compileProgram(VERTEX_SHADER_SRC, FRAGMENT_SHADER_SRC);
+    engine->cloudShader = compileProgram(CLOUD_VERT_SRC, CLOUD_FRAG_SRC);
 
     engine->textureArrayID = loadTexturesFromApk(engine->app->activity->assetManager);
 
+    // بناء الـ Chunk وتضاريسه
     engine->chunk = new ChunkSection(0, 0, 0);
-
-    // 1. توليد التضاريس الطبيعية
     for (int x = 0; x < 16; ++x) {
         for (int z = 0; z < 16; ++z) {
             int h = getTerrainHeight(x, z);
-
             for (int y = 0; y <= h; ++y) {
-                if (y == h) {
-                    engine->chunk->setBlock(x, y, z, BlockType::Grass);
-                } else if (y >= h - 2) {
-                    engine->chunk->setBlock(x, y, z, BlockType::Dirt);
-                } else {
-                    engine->chunk->setBlock(x, y, z, BlockType::Stone);
-                }
+                if (y == h) engine->chunk->setBlock(x, y, z, BlockType::Grass);
+                else if (y >= h - 2) engine->chunk->setBlock(x, y, z, BlockType::Dirt);
+                else engine->chunk->setBlock(x, y, z, BlockType::Stone);
             }
         }
     }
 
-    // 2. بناء شجرة ماينكرافت كلاسيكية عريضة وكثيفة
+    // زراعة شجرة كلاسيكية
     int tx = 8, tz = 8;
     int ty = getTerrainHeight(tx, tz) + 1;
-
-    // جذع الشجرة
     engine->chunk->setBlock(tx, ty, tz, BlockType::Dirt);
     engine->chunk->setBlock(tx, ty + 1, tz, BlockType::Dirt);
     engine->chunk->setBlock(tx, ty + 2, tz, BlockType::Dirt);
-
-    // طبقة الأوراق السفلية (عرض 3x3)
     for (int ox = -1; ox <= 1; ++ox) {
         for (int oz = -1; oz <= 1; ++oz) {
             engine->chunk->setBlock(tx + ox, ty + 2, tz + oz, BlockType::OakLeaves);
             engine->chunk->setBlock(tx + ox, ty + 3, tz + oz, BlockType::OakLeaves);
         }
     }
-
-    // قمة الأوراق المتقاطعة (Cross pattern في الأعلى)
     engine->chunk->setBlock(tx, ty + 4, tz, BlockType::OakLeaves);
     engine->chunk->setBlock(tx + 1, ty + 4, tz, BlockType::OakLeaves);
     engine->chunk->setBlock(tx - 1, ty + 4, tz, BlockType::OakLeaves);
@@ -301,8 +418,12 @@ static int initDisplay(Engine* engine) {
 
     engine->chunk->buildMesh();
 
-    engine->camera.position = glm::vec3(8.0f, 16.0f, 26.0f);
-    engine->camera.front = glm::normalize(glm::vec3(8.0f, 4.0f, 8.0f) - engine->camera.position);
+    // بناء مجسم الغيوم 3D
+    buildCloudMesh(engine);
+
+    // زاوية الكاميرا لمشاهدة السحاب والجبال والشجرة معاً
+    engine->camera.position = glm::vec3(8.0f, 17.0f, 28.0f);
+    engine->camera.front = glm::normalize(glm::vec3(8.0f, 5.0f, 8.0f) - engine->camera.position);
 
     return 0;
 }
@@ -310,35 +431,63 @@ static int initDisplay(Engine* engine) {
 static void drawFrame(Engine* engine) {
     if (engine->display == EGL_NO_DISPLAY) return;
 
+    // لون سماء ماينكرافت
     glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    glUseProgram(engine->shaderProgram);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, engine->textureArrayID);
-    GLint uTexLoc = glGetUniformLocation(engine->shaderProgram, "uTextureArray");
-    glUniform1i(uTexLoc, 0);
 
     float aspect = (float)engine->width / (float)engine->height;
     glm::mat4 projection = engine->camera.getProjectionMatrix(aspect);
     glm::mat4 view = engine->camera.getViewMatrix();
-    glm::mat4 model = glm::mat4(1.0f);
 
-    engine->rotationAngle += 0.010f;
-    model = glm::translate(model, glm::vec3(8.0f, 0.0f, 8.0f));
-    model = glm::rotate(model, engine->rotationAngle, glm::vec3(0.0f, 1.0f, 0.0f));
-    model = glm::translate(model, glm::vec3(-8.0f, 0.0f, -8.0f));
+    // ==============================================================
+    // 1. رسم مجسم العالم (The Voxel Chunk)
+    // ==============================================================
+    glUseProgram(engine->blockShader);
 
-    GLint uProjLoc = glGetUniformLocation(engine->shaderProgram, "uProjection");
-    GLint uViewLoc = glGetUniformLocation(engine->shaderProgram, "uView");
-    GLint uModelLoc = glGetUniformLocation(engine->shaderProgram, "uModel");
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, engine->textureArrayID);
+    glUniform1i(glGetUniformLocation(engine->blockShader, "uTextureArray"), 0);
 
-    glUniformMatrix4fv(uProjLoc, 1, GL_FALSE, &projection[0][0]);
-    glUniformMatrix4fv(uViewLoc, 1, GL_FALSE, &view[0][0]);
-    glUniformMatrix4fv(uModelLoc, 1, GL_FALSE, &model[0][0]);
+    glm::mat4 modelChunk = glm::mat4(1.0f);
+    engine->rotationAngle += 0.009f;
+    modelChunk = glm::translate(modelChunk, glm::vec3(8.0f, 0.0f, 8.0f));
+    modelChunk = glm::rotate(modelChunk, engine->rotationAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+    modelChunk = glm::translate(modelChunk, glm::vec3(-8.0f, 0.0f, -8.0f));
+
+    glUniformMatrix4fv(glGetUniformLocation(engine->blockShader, "uProjection"), 1, GL_FALSE, &projection[0][0]);
+    glUniformMatrix4fv(glGetUniformLocation(engine->blockShader, "uView"), 1, GL_FALSE, &view[0][0]);
+    glUniformMatrix4fv(glGetUniformLocation(engine->blockShader, "uModel"), 1, GL_FALSE, &modelChunk[0][0]);
 
     engine->chunk->render();
+
+    // ==============================================================
+    // 2. رسم الغيوم ثلاثية الأبعاد 3D Clouds (مع حركة الرياح والشفافية)
+    // ==============================================================
+    glUseProgram(engine->cloudShader);
+
+    // تفعيل دمج الشفافية للسحاب
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // حركة الرياح الانسيابية
+    engine->windOffset += 0.025f;
+    if (engine->windOffset > 3.5f * 24.0f) engine->windOffset = 0.0f;
+
+    glm::mat4 modelCloud = glm::mat4(1.0f);
+    // تدوير طفيف وانجراف مع الرياح في السماء
+    modelCloud = glm::translate(modelCloud, glm::vec3(8.0f + engine->windOffset, 0.0f, 8.0f));
+    modelCloud = glm::rotate(modelCloud, engine->rotationAngle * 0.3f, glm::vec3(0.0f, 1.0f, 0.0f));
+    modelCloud = glm::translate(modelCloud, glm::vec3(-8.0f, 0.0f, -8.0f));
+
+    glUniformMatrix4fv(glGetUniformLocation(engine->cloudShader, "uProjection"), 1, GL_FALSE, &projection[0][0]);
+    glUniformMatrix4fv(glGetUniformLocation(engine->cloudShader, "uView"), 1, GL_FALSE, &view[0][0]);
+    glUniformMatrix4fv(glGetUniformLocation(engine->cloudShader, "uModel"), 1, GL_FALSE, &modelCloud[0][0]);
+
+    glBindVertexArray(engine->cloudVAO);
+    glDrawArrays(GL_TRIANGLES, 0, engine->cloudVertexCount);
+    glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
 
     eglSwapBuffers(engine->display, engine->surface);
 }
@@ -384,7 +533,7 @@ extern "C" void android_main(struct android_app* state) {
     state->onAppCmd = handleCmd;
     engine.app = state;
 
-    LOGI("Minecraft Android Engine started!");
+    LOGI("Minecraft Android Engine started with 3D Clouds!");
 
     while (true) {
         int events;
