@@ -11,7 +11,6 @@ include_directories(
     lib/stb
 )
 
-# إذا كانت GLM موجودة
 find_package(glm QUIET)
 if (glm_FOUND)
     include_directories(${GLM_INCLUDE_DIRS})
@@ -19,23 +18,27 @@ else()
     include_directories(lib/glm)
 endif()
 
-# الملفات المشتركة بين الأندرويد والكمبيوتر
 set(COMMON_SOURCES
     src/TextureArray.cpp
     src/Shader.cpp
     src/ChunkSection.cpp
 )
 
-# -------------------------------------------------------------
-# في حال البناء للأندرويد (Android NDK)
-# -------------------------------------------------------------
 if (ANDROID)
+    # تجميع كود الربط الخاص بنظام أندرويد من داخل ملفات الـ NDK
+    add_library(app-glue STATIC
+        ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c
+    )
+
     add_library(${PROJECT_NAME} SHARED
         ${COMMON_SOURCES}
         src/android_main.cpp
     )
 
-    # تضمين مكتبات أندرويد الأساسية و EGL و GLESv3
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${ANDROID_NDK}/sources/android/native_app_glue
+    )
+
     find_library(LOG_LIB log)
     find_library(ANDROID_LIB android)
     find_library(EGL_LIB EGL)
@@ -43,15 +46,12 @@ if (ANDROID)
 
     target_link_libraries(${PROJECT_NAME}
         PRIVATE
+        app-glue
         ${LOG_LIB}
         ${ANDROID_LIB}
         ${EGL_LIB}
         ${GLES3_LIB}
     )
-
-# -------------------------------------------------------------
-# في حال البناء للكمبيوتر المكتبي (Desktop PC)
-# -------------------------------------------------------------
 else()
     find_package(OpenGL REQUIRED)
     find_package(glfw3 3.3 REQUIRED)
