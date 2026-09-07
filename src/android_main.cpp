@@ -16,6 +16,76 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+// شيدر الرؤوس مدمج للأندرويد
+const char* VERTEX_SHADER_SRC = R"(#version 300 es
+layout (location = 0) in uint aPackedData;
+
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProjection;
+
+out vec2 vTexCoord;
+flat out int vLayer;
+out float vLight;
+
+const vec2 UV_CORNERS[4] = vec2[4](
+    vec2(0.0, 0.0),
+    vec2(1.0, 0.0),
+    vec2(1.0, 1.0),
+    vec2(0.0, 1.0)
+);
+
+const float FACE_LIGHT[6] = float[6](
+    1.0,  // UP
+    0.5,  // DOWN
+    0.8,  // NORTH
+    0.8,  // SOUTH
+    0.6,  // WEST
+    0.6   // EAST
+);
+
+void main() {
+    uint x       = aPackedData & 31u;
+    uint y       = (aPackedData >> 5u) & 31u;
+    uint z       = (aPackedData >> 10u) & 31u;
+    uint faceDir = (aPackedData >> 15u) & 7u;
+    uint ao      = (aPackedData >> 18u) & 3u;
+    uint layer   = (aPackedData >> 20u) & 1023u;
+    uint uvIndex = (aPackedData >> 30u) & 3u;
+
+    vec3 localPos = vec3(float(x), float(y), float(z));
+
+    vTexCoord = UV_CORNERS[uvIndex];
+    vLayer = int(layer);
+    vLight = FACE_LIGHT[faceDir];
+
+    gl_Position = uProjection * uView * uModel * vec4(localPos, 1.0);
+}
+)";
+
+// شيدر البكسلات مدمج للأندرويد
+const char* FRAGMENT_SHADER_SRC = R"(#version 300 es
+precision mediump float;
+precision mediump sampler2DArray;
+
+in vec2 vTexCoord;
+flat in int vLayer;
+in float vLight;
+
+uniform sampler2DArray uTextureArray;
+
+out vec4 FragColor;
+
+void main() {
+    // لون افتراضي مشرق للتجربة حتى ربط ملفات الـ Assets
+    vec3 baseColor = vec3(0.4, 0.8, 0.3); // لون العشب الأخضر
+    if (vLight < 0.7) baseColor = vec3(0.5, 0.35, 0.2); // لون التراب والجوانب
+
+    vec3 finalColor = baseColor * vLight;
+    FragColor = vec4(finalColor, 1.0);
+}
+)";
+
 struct Engine {
     struct android_app* app;
     EGLDisplay display = EGL_NO_DISPLAY;
@@ -25,12 +95,18 @@ struct Engine {
     int32_t height = 0;
     bool animating = false;
 
-    Shader* shader = nullptr;
-    TextureArray* textures = nullptr;
+    GLuint shaderProgram = 0;
     ChunkSection* chunk = nullptr;
     Camera camera;
     float rotationAngle = 0.0f;
 };
+
+static GLuint compileShaderSrc(GLenum type, const char* src) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &src, nullptr);
+    glCompileShader(shader);
+    return shader;
+}
 
 static int initDisplay(Engine* engine) {
     const EGLint attribs[] = {
@@ -73,12 +149,17 @@ static int initDisplay(Engine* engine) {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
-    engine->shader = new Shader();
-    engine->shader->loadFromFiles("res/shaders/block.vert", "res/shaders/block.frag");
+    // تجميع الشيدر المدمج
+    GLuint vs = compileShaderSrc(GL_VERTEX_SHADER, VERTEX_SHADER_SRC);
+    GLuint fs = compileShaderSrc(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
+    engine->shaderProgram = glCreateProgram();
+    glAttachShader(engine->shaderProgram, vs);
+    glAttachShader(engine->shaderProgram, fs);
+    glLinkProgram(engine->shaderProgram);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
 
-    engine->textures = new TextureArray();
-    engine->textures->loadFromDirectory("res/textures/blocks");
-
+    // بناء عالم مصغر (Chunk)
     engine->chunk = new ChunkSection(0, 0, 0);
     for (int x = 0; x < 16; ++x) {
         for (int z = 0; z < 16; ++z) {
@@ -87,9 +168,16 @@ static int initDisplay(Engine* engine) {
             engine->chunk->setBlock(x, 2, z, BlockType::Grass);
         }
     }
+    // إضافة تضاريس وشجرة في المنتصف
     engine->chunk->setBlock(8, 3, 8, BlockType::Grass);
     engine->chunk->setBlock(8, 4, 8, BlockType::OakLeaves);
+    engine->chunk->setBlock(8, 5, 8, BlockType::OakLeaves);
+
     engine->chunk->buildMesh();
+
+    // وضعية الكاميرا لمشاهدة الـ Chunk بوضوح
+    engine->camera.position = glm::vec3(8.0f, 12.0f, 24.0f);
+    engine->camera.front = glm::normalize(glm::vec3(8.0f, 2.0f, 8.0f) - engine->camera.position);
 
     return 0;
 }
@@ -100,21 +188,26 @@ static void drawFrame(Engine* engine) {
     glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    engine->shader->use();
-    engine->textures->bind(0);
-    engine->shader->setInt("uTextureArray", 0);
+    glUseProgram(engine->shaderProgram);
 
     float aspect = (float)engine->width / (float)engine->height;
     glm::mat4 projection = engine->camera.getProjectionMatrix(aspect);
     glm::mat4 view = engine->camera.getViewMatrix();
     glm::mat4 model = glm::mat4(1.0f);
 
-    engine->rotationAngle += 0.015f;
+    // تدوير المشهد حول مركز الـ Chunk (النقطة 8, 0, 8)
+    engine->rotationAngle += 0.012f;
+    model = glm::translate(model, glm::vec3(8.0f, 0.0f, 8.0f));
     model = glm::rotate(model, engine->rotationAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+    model = glm::translate(model, glm::vec3(-8.0f, 0.0f, -8.0f));
 
-    engine->shader->setMat4("uProjection", projection);
-    engine->shader->setMat4("uView", view);
-    engine->shader->setMat4("uModel", model);
+    GLint uProjLoc = glGetUniformLocation(engine->shaderProgram, "uProjection");
+    GLint uViewLoc = glGetUniformLocation(engine->shaderProgram, "uView");
+    GLint uModelLoc = glGetUniformLocation(engine->shaderProgram, "uModel");
+
+    glUniformMatrix4fv(uProjLoc, 1, GL_FALSE, &projection[0][0]);
+    glUniformMatrix4fv(uViewLoc, 1, GL_FALSE, &view[0][0]);
+    glUniformMatrix4fv(uModelLoc, 1, GL_FALSE, &model[0][0]);
 
     engine->chunk->render();
 
@@ -156,14 +249,13 @@ static void handleCmd(struct android_app* app, int32_t cmd) {
     }
 }
 
-// extern "C" هي التي تجعل لغة C ترى الدالة وتمنع خطأ undefined symbol
 extern "C" void android_main(struct android_app* state) {
     Engine engine{};
     state->userData = &engine;
     state->onAppCmd = handleCmd;
     engine.app = state;
 
-    LOGI("Minecraft Android Engine initialized!");
+    LOGI("Minecraft Android Engine started!");
 
     while (true) {
         int events;
