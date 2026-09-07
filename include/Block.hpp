@@ -10,11 +10,11 @@ enum class BlockType : uint8_t {
     Grass,
     Dirt,
     Stone,
-    Bedrock,     // 1. حجر الأساس
-    Sand,        // 2. رمال الشواطئ
-    Water,       // 3. ماء البحار
-    OakLog,      // خشب السنديان
-    OakLeaves,   // أوراق الشجر
+    Bedrock,     // قاع العالم عند -64
+    Sand,        // رمال الشواطئ
+    Water,       // ماء البحار
+    OakLog,      // خشب الشجرة
+    OakLeaves,   // أوراق الشجر (صلبة الآن!)
     Count
 };
 
@@ -27,7 +27,11 @@ inline bool isBlockOpaque(BlockType type) {
            type == BlockType::OakLog;
 }
 
-// 4. دالة فحص الماء
+// دالة التصادم: أوراق الشجر أصبحت صلبة تقف وتصطدم بها!
+inline bool isBlockSolid(BlockType type) {
+    return type != BlockType::Air && type != BlockType::Water;
+}
+
 inline bool isBlockWater(BlockType type) {
     return type == BlockType::Water;
 }
