@@ -4,6 +4,8 @@
 #include "WorldConstants.hpp"
 #include "ChunkSection.hpp"
 
+class World;
+
 class ChunkColumn {
 public:
     int chunkX = 0, chunkZ = 0;
@@ -11,7 +13,6 @@ public:
 
     ChunkColumn(int cx, int cz) : chunkX(cx), chunkZ(cz) {}
 
-    // تحويل الارتفاع العالمي Y (-64 إلى 319) إلى رقم المقطع (0 إلى 23)
     int getSectionIndex(int globalY) const {
         if (globalY < WORLD_MIN_Y || globalY >= WORLD_MAX_Y) return -1;
         return (globalY - WORLD_MIN_Y) / SECTION_SIZE;
@@ -21,7 +22,6 @@ public:
         int idx = getSectionIndex(globalY);
         if (idx < 0 || idx >= NUM_SECTIONS) return;
 
-        // حجز الذاكرة للمقطع فقط إذا كان يحوي بلوكات حقيقية! (توفير 80% من الرام)
         if (!sections[idx]) {
             int sectionChunkY = (idx * SECTION_SIZE) + WORLD_MIN_Y;
             sections[idx] = std::make_unique<ChunkSection>(chunkX, sectionChunkY, chunkZ);
@@ -38,10 +38,10 @@ public:
         return sections[idx]->getBlock(x, localY, z);
     }
 
-    void buildAllMeshes() {
+    void buildAllMeshes(const World* world = nullptr) {
         for (int i = 0; i < NUM_SECTIONS; ++i) {
             if (sections[i] && !sections[i]->isEmpty()) {
-                sections[i]->buildMesh();
+                sections[i]->buildMesh(world);
             }
         }
     }
