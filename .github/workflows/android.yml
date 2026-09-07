@@ -33,14 +33,22 @@ jobs:
         run: |
           sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
 
-      # تحميل مكتبة GLM
+      # تحميل مكتبة GLM تلقائياً
       - name: Download GLM Library
         run: |
           if [ ! -d "lib/glm" ]; then
             git clone --depth 1 https://github.com/g-truc/glm.git lib/glm
           fi
 
-      # حل عبقري: إنشاء جسر glad للأندرويد تلقائياً لمنع أي خطأ missing glad
+      # تحميل مكتبة stb_image.h تلقائياً لحل مشكلة قراءة الصور
+      - name: Download STB Image Library
+        run: |
+          mkdir -p lib/stb
+          if [ ! -f "lib/stb/stb_image.h" ]; then
+            curl -s -L https://raw.githubusercontent.com/nothings/stb/master/stb_image.h -o lib/stb/stb_image.h
+          fi
+
+      # إنشاء جسر GLAD للأندرويد
       - name: Setup OpenGL Header Bridge
         run: |
           mkdir -p include/glad
