@@ -1,6 +1,5 @@
 name: Build Android APK
 
-# هذا السطر يعني: لا تبنِ عند الـ Push أو الـ PR، بل يدوياً فقط!
 on:
   workflow_dispatch:
 
@@ -20,6 +19,12 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # تثبيت ج Gradle تلقائياً للاستغناء عن ملف gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
@@ -27,11 +32,11 @@ jobs:
         run: |
           sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
 
+      # البناء مباشرة باستخدام أمر gradle
       - name: Build Android APK with Gradle
         run: |
           cd android
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --stacktrace
+          gradle assembleDebug --stacktrace
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
