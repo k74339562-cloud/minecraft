@@ -9,6 +9,7 @@ class World;
 class ChunkColumn {
 public:
     int chunkX = 0, chunkZ = 0;
+    bool isMeshed = false;
     std::unique_ptr<ChunkSection> sections[NUM_SECTIONS];
 
     ChunkColumn(int cx, int cz) : chunkX(cx), chunkZ(cz) {}
@@ -44,5 +45,6 @@ public:
                 sections[i]->buildMesh(world);
             }
         }
+        isMeshed = true;
     }
 };
