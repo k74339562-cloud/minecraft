@@ -40,16 +40,23 @@ jobs:
             git clone --depth 1 https://github.com/g-truc/glm.git lib/glm
           fi
 
-      # تشغيل البناء مع طباعة تقرير CMake بدقة إذا فشل
+      # فحص ملفات المشروع في السيرفر
+      - name: Inspect Files
+        run: |
+          echo "=== FILES IN SRC ==="
+          ls -R src/ || true
+
+      # تشغيل البناء مع صيد الخطأ وطباعة آخر 80 سطراً فوراً إذا حدث أي خطأ
       - name: Build Android APK with Gradle
         run: |
           cd android
-          if ! gradle assembleDebug --no-daemon --console=plain; then
-            echo "====================== EXACT CMAKE ERROR LOG ======================"
-            find app/.cxx -name "*output.txt" -exec cat {} + 2>/dev/null || true
+          gradle assembleDebug --no-daemon --console=plain > build.log 2>&1 || {
+            echo "====================== REAL ERROR DETAILS ======================"
+            tail -n 80 build.log
             exit 1
-          fi
+          }
 
+      # رفع ملف الـ APK
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
