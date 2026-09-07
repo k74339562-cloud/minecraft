@@ -40,23 +40,25 @@ jobs:
             git clone --depth 1 https://github.com/g-truc/glm.git lib/glm
           fi
 
-      # فحص ملفات المشروع في السيرفر
-      - name: Inspect Files
+      # حل عبقري: إنشاء جسر glad للأندرويد تلقائياً لمنع أي خطأ missing glad
+      - name: Setup OpenGL Header Bridge
         run: |
-          echo "=== FILES IN SRC ==="
-          ls -R src/ || true
+          mkdir -p include/glad
+          cat << 'EOF' > include/glad/glad.h
+          #pragma once
+          #ifdef __ANDROID__
+              #include <GLES3/gl3.h>
+              #include <EGL/egl.h>
+          #endif
+          EOF
 
-      # تشغيل البناء مع صيد الخطأ وطباعة آخر 80 سطراً فوراً إذا حدث أي خطأ
+      # تشغيل البناء
       - name: Build Android APK with Gradle
         run: |
           cd android
-          gradle assembleDebug --no-daemon --console=plain > build.log 2>&1 || {
-            echo "====================== REAL ERROR DETAILS ======================"
-            tail -n 80 build.log
-            exit 1
-          }
+          gradle assembleDebug --no-daemon --console=plain
 
-      # رفع ملف الـ APK
+      # رفع ملف الـ APK النهائي
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
