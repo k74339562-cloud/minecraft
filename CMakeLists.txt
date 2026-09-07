@@ -4,7 +4,7 @@ project(MinecraftClone LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# مسارات الترويسات الشاملة لكل المكتبات
+# مسارات الترويسات الشاملة
 include_directories(
     include
     lib
@@ -24,27 +24,30 @@ set(COMMON_SOURCES
 # ==============================================================================
 # إعدادات البناء للأندرويد (Android NDK)
 # ==============================================================================
-if (ANDROID)
-    if (NOT DEFINED ANDROID_NDK)
-        set(ANDROID_NDK ${CMAKE_ANDROID_NDK})
+if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
+
+    # تحديد مسار الـ NDK بشكل قاطع
+    if (NOT DEFINED NDK_DIR)
+        if (DEFINED ANDROID_NDK)
+            set(NDK_DIR "${ANDROID_NDK}")
+        elseif (DEFINED CMAKE_ANDROID_NDK)
+            set(NDK_DIR "${CMAKE_ANDROID_NDK}")
+        endif()
     endif()
 
-    # تجميع كود ربط أندرويد الداخلي مع مساراته
-    add_library(app-glue STATIC
-        ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c
-    )
-    target_include_directories(app-glue PUBLIC
-        ${ANDROID_NDK}/sources/android/native_app_glue
-    )
+    set(GLUE_DIR "${NDK_DIR}/sources/android/native_app_glue")
+    set(GLUE_SRC "${GLUE_DIR}/android_native_app_glue.c")
 
-    # تجميع ملفات اللعبة كـ Native Library للأندرويد
+    # تجميع اللعبة مع كود الربط مباشرة كـ Shared Library واحدة متماسكة
     add_library(${PROJECT_NAME} SHARED
         ${COMMON_SOURCES}
         src/android_main.cpp
+        ${GLUE_SRC}
     )
 
     target_include_directories(${PROJECT_NAME} PRIVATE
-        ${ANDROID_NDK}/sources/android/native_app_glue
+        ${GLUE_DIR}
+        include
     )
 
     find_library(LOG_LIB log)
@@ -54,7 +57,6 @@ if (ANDROID)
 
     target_link_libraries(${PROJECT_NAME}
         PRIVATE
-        app-glue
         ${LOG_LIB}
         ${ANDROID_LIB}
         ${EGL_LIB}
