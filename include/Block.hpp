@@ -11,7 +11,7 @@ enum class BlockType : uint8_t {
     Dirt,
     Stone,
     Bedrock,     // حجر الأساس عند -64
-    Sand,        // رمال الشواطئ وقاع البحر
+    Sand,        // رمال الشواطئ
     Water,       // ماء البحار والمحيطات
     OakLog,      // خشب الشجرة
     OakLeaves,   // أوراق الشجر
