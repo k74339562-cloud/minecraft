@@ -1,12 +1,10 @@
 #pragma once
 
+#include "WorldConstants.hpp"
 #include "Block.hpp"
 #include "Vertex.hpp"
 #include "OpenGL.hpp"
 #include <vector>
-
-constexpr int SECTION_SIZE = 16;
-constexpr int SECTION_VOLUME = SECTION_SIZE * SECTION_SIZE * SECTION_SIZE;
 
 class ChunkSection {
 public:
