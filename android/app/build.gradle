@@ -5,6 +5,7 @@ plugins {
 android {
     namespace 'com.engine.minecraftclone'
     compileSdk 34
+    ndkVersion "26.1.10909125"
 
     defaultConfig {
         applicationId "com.engine.minecraftclone"
@@ -12,10 +13,6 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
-
-        ndk {
-            abiFilters 'arm64-v8a', 'armeabi-v7a'
-        }
 
         externalNativeBuild {
             cmake {
