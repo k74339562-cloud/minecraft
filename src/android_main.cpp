@@ -9,6 +9,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <string>
+#include <cmath>
 
 #include "Shader.hpp"
 #include "ChunkSection.hpp"
@@ -19,7 +20,43 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// شيدر الرؤوس لفك ضغط الفيرتكس 32-bit
+// خوارزمية توليد التضاريس الطبيعية لماينكرافت (2D Gradient Noise)
+static float hash2D(int x, int z) {
+    int n = x + z * 57;
+    n = (n << 13) ^ n;
+    return (1.0f - ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0f);
+}
+
+static float smoothNoise(float x, float z) {
+    int ix = (int)std::floor(x);
+    int iz = (int)std::floor(z);
+    float fx = x - ix;
+    float fz = z - iz;
+
+    fx = fx * fx * (3.0f - 2.0f * fx);
+    fz = fz * fz * (3.0f - 2.0f * fz);
+
+    float s00 = hash2D(ix, iz);
+    float s10 = hash2D(ix + 1, iz);
+    float s01 = hash2D(ix, iz + 1);
+    float s11 = hash2D(ix + 1, iz + 1);
+
+    float x0 = s00 * (1.0f - fx) + s10 * fx;
+    float x1 = s01 * (1.0f - fx) + s11 * fx;
+
+    return x0 * (1.0f - fz) + x1 * fz;
+}
+
+static int getTerrainHeight(int x, int z) {
+    float noise = 0.0f;
+    noise += smoothNoise(x * 0.12f, z * 0.12f) * 3.5f;
+    noise += smoothNoise(x * 0.25f, z * 0.25f) * 1.5f;
+    int h = 4 + (int)noise;
+    if (h < 2) h = 2;
+    if (h > 9) h = 9;
+    return h;
+}
+
 const char* VERTEX_SHADER_SRC = R"(#version 300 es
 layout (location = 0) in uint aPackedData;
 
@@ -66,7 +103,6 @@ void main() {
 }
 )";
 
-// شيدر البكسلات: قراءة صور التكستشر الحقيقية بدقة البكسل الحادة!
 const char* FRAGMENT_SHADER_SRC = R"(#version 300 es
 precision mediump float;
 precision mediump sampler2DArray;
@@ -80,15 +116,12 @@ uniform sampler2DArray uTextureArray;
 out vec4 FragColor;
 
 void main() {
-    // قراءة البكسل من مصفوفة التكستشر بالطبقة المحددة
     vec4 texColor = texture(uTextureArray, vec3(vTexCoord, float(vLayer)));
 
-    // إذا كان البكسل شفافاً الغِه (لأوراق الشجر)
     if (texColor.a < 0.5) {
         discard;
     }
 
-    // دمج لون التكستشر الأصلي مع تظليل ماينكرافت
     FragColor = vec4(texColor.rgb * vLight, texColor.a);
 }
 )";
@@ -109,14 +142,13 @@ struct Engine {
     float rotationAngle = 0.0f;
 };
 
-// قراءة ملفات الصور من حزمة APK وتكوين مصفوفة GL_TEXTURE_2D_ARRAY
 static GLuint loadTexturesFromApk(AAssetManager* mgr) {
     std::vector<std::string> textureNames = {
-        "grass_block_top.png",   // الطبقة 0
-        "grass_block_side.png",  // الطبقة 1
-        "dirt.png",              // الطبقة 2
-        "stone.png",             // الطبقة 3
-        "oak_leaves.png"         // الطبقة 4
+        "grass_block_top.png",   // Layer 0
+        "grass_block_side.png",  // Layer 1
+        "dirt.png",              // Layer 2
+        "stone.png",             // Layer 3
+        "oak_leaves.png"         // Layer 4
     };
 
     GLuint texID = 0;
@@ -131,7 +163,6 @@ static GLuint loadTexturesFromApk(AAssetManager* mgr) {
     for (int i = 0; i < layerCount; ++i) {
         std::string filename = textureNames[i];
         
-        // محاولة البحث عن الصورة في مسارات الأصول
         AAsset* asset = AAssetManager_open(mgr, ("textures/blocks/" + filename).c_str(), AASSET_MODE_BUFFER);
         if (!asset) {
             asset = AAssetManager_open(mgr, ("res/textures/blocks/" + filename).c_str(), AASSET_MODE_BUFFER);
@@ -147,18 +178,16 @@ static GLuint loadTexturesFromApk(AAssetManager* mgr) {
             if (data) {
                 glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, i, w, h, 1, GL_RGBA, GL_UNSIGNED_BYTE, data);
                 stbi_image_free(data);
-                LOGI("Loaded texture %s to Layer %d", filename.c_str(), i);
+                LOGI("Loaded %s to Layer %d", filename.c_str(), i);
             }
             AAsset_close(asset);
         } else {
-            LOGE("Could not find asset: %s (generating fallback)", filename.c_str());
-            // نمط احتياطي بلون البلوكة إذا لم يجد الصورة
-            std::vector<uint32_t> fallback(16 * 16, (i == 0 ? 0xFF55AA55 : (i == 1 ? 0xFF336688 : 0xFF224466)));
+            // صورة بديلة بحجم 16x16 إذا لم تكن موجودة
+            std::vector<uint32_t> fallback(16 * 16, (i == 3 ? 0xFF888888 : 0xFF22AA22));
             glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, i, 16, 16, 1, GL_RGBA, GL_UNSIGNED_BYTE, fallback.data());
         }
     }
 
-    // فلترة البكسلات الحادة (مثل ماينكرافت تماماً وبدون أي تغبيش)
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -216,7 +245,6 @@ static int initDisplay(Engine* engine) {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
 
-    // تجميع الشيدر
     GLuint vs = compileShaderSrc(GL_VERTEX_SHADER, VERTEX_SHADER_SRC);
     GLuint fs = compileShaderSrc(GL_FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
     engine->shaderProgram = glCreateProgram();
@@ -226,27 +254,53 @@ static int initDisplay(Engine* engine) {
     glDeleteShader(vs);
     glDeleteShader(fs);
 
-    // تحميل صور التكستشر الحقيقية الخاصة بك
     engine->textureArrayID = loadTexturesFromApk(engine->app->activity->assetManager);
 
-    // بناء الـ Chunk
+    // ==============================================================
+    // توليد الـ Chunk الحقيقي بتضاريس وطبقات ماينكرافت الطبيعية
+    // ==============================================================
     engine->chunk = new ChunkSection(0, 0, 0);
+
     for (int x = 0; x < 16; ++x) {
         for (int z = 0; z < 16; ++z) {
-            engine->chunk->setBlock(x, 0, z, BlockType::Stone);
-            engine->chunk->setBlock(x, 1, z, BlockType::Dirt);
-            engine->chunk->setBlock(x, 2, z, BlockType::Grass);
+            int h = getTerrainHeight(x, z);
+
+            for (int y = 0; y <= h; ++y) {
+                if (y == h) {
+                    // السطح عشب أخضر دائماً
+                    engine->chunk->setBlock(x, y, z, BlockType::Grass);
+                } else if (y >= h - 2) {
+                    // تحت العشب بطبقتين تراب نقي
+                    engine->chunk->setBlock(x, y, z, BlockType::Dirt);
+                } else {
+                    // في الأعماق صخر صلب
+                    engine->chunk->setBlock(x, y, z, BlockType::Stone);
+                }
+            }
         }
     }
-    // إضافة مكعبات عشب وشجر في المنتصف
-    engine->chunk->setBlock(8, 3, 8, BlockType::Grass);
-    engine->chunk->setBlock(8, 4, 8, BlockType::OakLeaves);
-    engine->chunk->setBlock(8, 5, 8, BlockType::OakLeaves);
+
+    // زراعة شجرة طبيعية فوق إحدى تلال الـ Chunk (عند 8, z=8)
+    int treeBaseY = getTerrainHeight(8, 8) + 1;
+    // جذع الشجرة
+    engine->chunk->setBlock(8, treeBaseY, 8, BlockType::Dirt);
+    engine->chunk->setBlock(8, treeBaseY + 1, 8, BlockType::Dirt);
+    engine->chunk->setBlock(8, treeBaseY + 2, 8, BlockType::Dirt);
+
+    // أوراق الشجر حول القمة
+    for (int ox = -1; ox <= 1; ++ox) {
+        for (int oz = -1; oz <= 1; ++oz) {
+            engine->chunk->setBlock(8 + ox, treeBaseY + 2, 8 + oz, BlockType::OakLeaves);
+            engine->chunk->setBlock(8 + ox, treeBaseY + 3, 8 + oz, BlockType::OakLeaves);
+        }
+    }
+    engine->chunk->setBlock(8, treeBaseY + 4, 8, BlockType::OakLeaves);
 
     engine->chunk->buildMesh();
 
-    engine->camera.position = glm::vec3(8.0f, 14.0f, 22.0f);
-    engine->camera.front = glm::normalize(glm::vec3(8.0f, 2.0f, 8.0f) - engine->camera.position);
+    // ضبط الكاميرا بزاوية سينمائية لتشاهد الجبال والوديان بوضوح
+    engine->camera.position = glm::vec3(8.0f, 16.0f, 26.0f);
+    engine->camera.front = glm::normalize(glm::vec3(8.0f, 4.0f, 8.0f) - engine->camera.position);
 
     return 0;
 }
@@ -254,13 +308,11 @@ static int initDisplay(Engine* engine) {
 static void drawFrame(Engine* engine) {
     if (engine->display == EGL_NO_DISPLAY) return;
 
-    // لون سماء ماينكرافت الصافية
     glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glUseProgram(engine->shaderProgram);
 
-    // تفعيل مصفوفة التكستشر وربطها بالشيدر
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, engine->textureArrayID);
     GLint uTexLoc = glGetUniformLocation(engine->shaderProgram, "uTextureArray");
@@ -271,8 +323,7 @@ static void drawFrame(Engine* engine) {
     glm::mat4 view = engine->camera.getViewMatrix();
     glm::mat4 model = glm::mat4(1.0f);
 
-    // تدوير المشهد بنعومة حول المركز
-    engine->rotationAngle += 0.012f;
+    engine->rotationAngle += 0.010f;
     model = glm::translate(model, glm::vec3(8.0f, 0.0f, 8.0f));
     model = glm::rotate(model, engine->rotationAngle, glm::vec3(0.0f, 1.0f, 0.0f));
     model = glm::translate(model, glm::vec3(-8.0f, 0.0f, -8.0f));
