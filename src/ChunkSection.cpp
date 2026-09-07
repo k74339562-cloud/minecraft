@@ -40,36 +40,30 @@ bool ChunkSection::isFaceVisible(int x, int y, int z, Direction dir) const {
         case DIR_EAST:  nx++; break;
     }
 
-    if (nx < 0 || nx >= SECTION_SIZE || ny < 0 || ny >= SECTION_SIZE || nz < 0 || nz >= SECTION_SIZE) {
-        return true;
-    }
+    if (nx < 0 || nx >= SECTION_SIZE || ny < 0 || ny >= SECTION_SIZE || nz < 0 || nz >= SECTION_SIZE) return true;
 
     BlockType current = getBlock(x, y, z);
     BlockType neighbor = getBlock(nx, ny, nz);
 
     if (isBlockAir(neighbor)) return true;
-    if (isBlockOpaque(neighbor)) return false; // الخشب والتراب والصخر يحجب ما خلفه تماماً
+    if (isBlockOpaque(neighbor)) return false;
 
-    // سر ماينكرافت Fancy: رسم الأوجه بين أوراق الشجر لتكون الشجرة ممتلئة بعمق حقيقي!
-    if (current == BlockType::OakLeaves && neighbor == BlockType::OakLeaves) {
-        return true;
-    }
+    // رسم أوجه أوراق الشجر للعمق
+    if (current == BlockType::OakLeaves && neighbor == BlockType::OakLeaves) return true;
+
+    // حجب الأوجه بين كتلتين من الماء المتلاصق
+    if (isBlockWater(current) && isBlockWater(neighbor)) return false;
 
     if (current == neighbor) return false;
-
     return true;
 }
 
-void ChunkSection::addFace(std::vector<PackedVertex>& vertices, 
-                           int x, int y, int z, Direction dir, int texLayer) {
-    uint32_t x0 = x, x1 = x + 1;
-    uint32_t y0 = y, y1 = y + 1;
-    uint32_t z0 = z, z1 = z + 1;
-    uint32_t d = static_cast<uint32_t>(dir);
-    uint32_t ao = 0;
+void ChunkSection::addFace(std::vector<PackedVertex>& vertices, int x, int y, int z, Direction dir, int texLayer) {
+    uint32_t x0 = x, x1 = x + 1, y0 = y, y1 = y + 1, z0 = z, z1 = z + 1;
+    uint32_t d = static_cast<uint32_t>(dir), ao = 0;
 
     switch (dir) {
-        case DIR_UP: // +Y
+        case DIR_UP:
             vertices.push_back(PackedVertex::create(x0, y1, z1, d, ao, texLayer, 0));
             vertices.push_back(PackedVertex::create(x1, y1, z1, d, ao, texLayer, 1));
             vertices.push_back(PackedVertex::create(x1, y1, z0, d, ao, texLayer, 2));
@@ -77,8 +71,7 @@ void ChunkSection::addFace(std::vector<PackedVertex>& vertices,
             vertices.push_back(PackedVertex::create(x0, y1, z0, d, ao, texLayer, 3));
             vertices.push_back(PackedVertex::create(x0, y1, z1, d, ao, texLayer, 0));
             break;
-
-        case DIR_DOWN: // -Y
+        case DIR_DOWN:
             vertices.push_back(PackedVertex::create(x0, y0, z0, d, ao, texLayer, 0));
             vertices.push_back(PackedVertex::create(x1, y0, z0, d, ao, texLayer, 1));
             vertices.push_back(PackedVertex::create(x1, y0, z1, d, ao, texLayer, 2));
@@ -86,8 +79,7 @@ void ChunkSection::addFace(std::vector<PackedVertex>& vertices,
             vertices.push_back(PackedVertex::create(x0, y0, z1, d, ao, texLayer, 3));
             vertices.push_back(PackedVertex::create(x0, y0, z0, d, ao, texLayer, 0));
             break;
-
-        case DIR_NORTH: // -Z
+        case DIR_NORTH:
             vertices.push_back(PackedVertex::create(x1, y0, z0, d, ao, texLayer, 0));
             vertices.push_back(PackedVertex::create(x0, y0, z0, d, ao, texLayer, 1));
             vertices.push_back(PackedVertex::create(x0, y1, z0, d, ao, texLayer, 2));
@@ -95,8 +87,7 @@ void ChunkSection::addFace(std::vector<PackedVertex>& vertices,
             vertices.push_back(PackedVertex::create(x1, y1, z0, d, ao, texLayer, 3));
             vertices.push_back(PackedVertex::create(x1, y0, z0, d, ao, texLayer, 0));
             break;
-
-        case DIR_SOUTH: // +Z
+        case DIR_SOUTH:
             vertices.push_back(PackedVertex::create(x0, y0, z1, d, ao, texLayer, 0));
             vertices.push_back(PackedVertex::create(x1, y0, z1, d, ao, texLayer, 1));
             vertices.push_back(PackedVertex::create(x1, y1, z1, d, ao, texLayer, 2));
@@ -104,8 +95,7 @@ void ChunkSection::addFace(std::vector<PackedVertex>& vertices,
             vertices.push_back(PackedVertex::create(x0, y1, z1, d, ao, texLayer, 3));
             vertices.push_back(PackedVertex::create(x0, y0, z1, d, ao, texLayer, 0));
             break;
-
-        case DIR_WEST: // -X
+        case DIR_WEST:
             vertices.push_back(PackedVertex::create(x0, y0, z0, d, ao, texLayer, 0));
             vertices.push_back(PackedVertex::create(x0, y0, z1, d, ao, texLayer, 1));
             vertices.push_back(PackedVertex::create(x0, y1, z1, d, ao, texLayer, 2));
@@ -113,8 +103,7 @@ void ChunkSection::addFace(std::vector<PackedVertex>& vertices,
             vertices.push_back(PackedVertex::create(x0, y1, z0, d, ao, texLayer, 3));
             vertices.push_back(PackedVertex::create(x0, y0, z0, d, ao, texLayer, 0));
             break;
-
-        case DIR_EAST: // +X
+        case DIR_EAST:
             vertices.push_back(PackedVertex::create(x1, y0, z1, d, ao, texLayer, 0));
             vertices.push_back(PackedVertex::create(x1, y0, z0, d, ao, texLayer, 1));
             vertices.push_back(PackedVertex::create(x1, y1, z0, d, ao, texLayer, 2));
@@ -140,24 +129,15 @@ void ChunkSection::buildMesh() {
                 int topTex = 0, sideTex = 1, bottomTex = 2;
 
                 switch (block) {
-                    case BlockType::Grass:
-                        topTex = 0; sideTex = 1; bottomTex = 2;
-                        break;
-                    case BlockType::Dirt:
-                        topTex = sideTex = bottomTex = 2;
-                        break;
-                    case BlockType::Stone:
-                        topTex = sideTex = bottomTex = 3;
-                        break;
-                    case BlockType::OakLeaves:
-                        topTex = sideTex = bottomTex = 4;
-                        break;
-                    case BlockType::OakLog:
-                        // خشب السنديان: السطح والقاع حلقات (طبقة 6)، والجوانب لحاء (طبقة 5)
-                        topTex = 6; bottomTex = 6; sideTex = 5;
-                        break;
-                    default:
-                        break;
+                    case BlockType::Grass:     topTex = 0; sideTex = 1; bottomTex = 2; break;
+                    case BlockType::Dirt:      topTex = sideTex = bottomTex = 2; break;
+                    case BlockType::Stone:     topTex = sideTex = bottomTex = 3; break;
+                    case BlockType::Bedrock:   topTex = sideTex = bottomTex = 3; break; // حجر الأساس
+                    case BlockType::OakLeaves: topTex = sideTex = bottomTex = 4; break;
+                    case BlockType::OakLog:    topTex = 6; bottomTex = 6; sideTex = 5; break;
+                    case BlockType::Sand:      topTex = sideTex = bottomTex = 7; break; // رمل
+                    case BlockType::Water:     topTex = sideTex = bottomTex = 8; break; // ماء
+                    default: break;
                 }
 
                 if (isFaceVisible(x, y, z, DIR_UP))    addFace(vertices, x, y, z, DIR_UP, topTex);
@@ -182,7 +162,6 @@ void ChunkSection::buildMesh() {
 
     glEnableVertexAttribArray(0);
     glVertexAttribIPointer(0, 1, GL_UNSIGNED_INT, sizeof(PackedVertex), (void*)0);
-
     glBindVertexArray(0);
 }
 
