@@ -14,34 +14,42 @@ include_directories(
     lib/glm
 )
 
-# الملفات المشتركة للمحرك
-set(COMMON_SOURCES
-    src/TextureArray.cpp
-    src/Shader.cpp
-    src/ChunkSection.cpp
-)
+# تجميع كل ملفات الـ C++ تلقائياً من مجلد src مهما كانت تسميتها
+file(GLOB_RECURSE ALL_SOURCES "src/*.cpp")
+
+if (NOT ALL_SOURCES)
+    message(FATAL_ERROR "No .cpp source files found in 'src/'! Please make sure your source files are inside 'src/'.")
+endif()
 
 # ==============================================================================
 # إعدادات البناء للأندرويد (Android NDK)
 # ==============================================================================
 if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
 
-    # تحديد مسار الـ NDK بشكل قاطع
-    if (NOT DEFINED NDK_DIR)
-        if (DEFINED ANDROID_NDK)
-            set(NDK_DIR "${ANDROID_NDK}")
-        elseif (DEFINED CMAKE_ANDROID_NDK)
-            set(NDK_DIR "${CMAKE_ANDROID_NDK}")
-        endif()
+    # استبعاد main.cpp الخاص بالكمبيوتر
+    set(ANDROID_SOURCES ${ALL_SOURCES})
+    list(FILTER ANDROID_SOURCES EXCLUDE REGEX ".*/main\\.cpp$")
+
+    # البحث التلقائي الدقيق عن ملف ربط الأندرويد داخل NDK
+    find_file(GLUE_SRC
+        NAMES android_native_app_glue.c
+        PATHS
+            "${ANDROID_NDK}/sources/android/native_app_glue"
+            "${CMAKE_ANDROID_NDK}/sources/android/native_app_glue"
+            "$ENV{ANDROID_NDK_HOME}/sources/android/native_app_glue"
+            "$ENV{ANDROID_NDK_ROOT}/sources/android/native_app_glue"
+            "/usr/local/lib/android/sdk/ndk/26.1.10909125/sources/android/native_app_glue"
+    )
+
+    if (NOT GLUE_SRC)
+        message(FATAL_ERROR "Could not find android_native_app_glue.c in Android NDK!")
     endif()
 
-    set(GLUE_DIR "${NDK_DIR}/sources/android/native_app_glue")
-    set(GLUE_SRC "${GLUE_DIR}/android_native_app_glue.c")
+    get_filename_component(GLUE_DIR "${GLUE_SRC}" DIRECTORY)
 
-    # تجميع اللعبة مع كود الربط مباشرة كـ Shared Library واحدة متماسكة
+    # تجميع اللعبة مع كود الربط مباشرة
     add_library(${PROJECT_NAME} SHARED
-        ${COMMON_SOURCES}
-        src/android_main.cpp
+        ${ANDROID_SOURCES}
         ${GLUE_SRC}
     )
 
@@ -67,12 +75,14 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR ANDROID)
 # إعدادات البناء للكمبيوتر (Desktop PC)
 # ==============================================================================
 else()
+    set(DESKTOP_SOURCES ${ALL_SOURCES})
+    list(FILTER DESKTOP_SOURCES EXCLUDE REGEX ".*/android_main\\.cpp$")
+
     find_package(OpenGL REQUIRED)
     find_package(glfw3 3.3 REQUIRED)
 
     add_executable(${PROJECT_NAME}
-        ${COMMON_SOURCES}
-        src/main.cpp
+        ${DESKTOP_SOURCES}
         lib/glad/src/glad.c
     )
 
