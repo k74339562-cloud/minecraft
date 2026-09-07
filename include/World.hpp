@@ -5,7 +5,8 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-#include <glm/glm.hpp> // حل مشكلة glm
+#include <chrono>
+#include <glm/glm.hpp>
 
 #include "ChunkColumn.hpp"
 #include "TerrainGenerator.hpp"
@@ -17,7 +18,14 @@ inline uint64_t getChunkKey(int cx, int cz) {
 class World {
 public:
     std::unordered_map<uint64_t, std::unique_ptr<ChunkColumn>> chunks;
-    const int viewDistance = 2; // يولد شبكة 5x5 Chunks حول اللاعب
+    const int viewDistance = 2; // 5x5 شبكة تظل محفوظة بالذاكرة دائماً
+    int seed = 1337;
+
+    World() {
+        // توليد Seed عشوائي فريد عند كل تشغيل للعبة!
+        auto now = std::chrono::high_resolution_clock::now();
+        seed = (int)(now.time_since_epoch().count() % 1000000);
+    }
 
     void generateColumnData(int cx, int cz) {
         uint64_t key = getChunkKey(cx, cz);
@@ -29,16 +37,18 @@ public:
             for (int z = 0; z < SECTION_SIZE; ++z) {
                 int wx = cx * SECTION_SIZE + x;
                 int wz = cz * SECTION_SIZE + z;
-                int h = getTerrainHeight(wx, wz);
+                int h = getTerrainHeight(wx, wz, seed);
 
-                // قاع Bedrock
+                // 1. Bedrock صلب في القاع -64
                 col->setBlock(x, WORLD_MIN_Y, z, BlockType::Bedrock);
                 col->setBlock(x, WORLD_MIN_Y + 1, z, BlockType::Bedrock);
 
+                // 2. صخور الأعماق
                 for (int y = WORLD_MIN_Y + 2; y < h - 3; ++y) {
                     col->setBlock(x, y, z, BlockType::Stone);
                 }
 
+                // 3. الشواطئ والمحيطات أو التلال
                 if (h <= SEA_LEVEL + 1) {
                     for (int y = std::max(WORLD_MIN_Y + 2, h - 3); y <= h; ++y) {
                         col->setBlock(x, y, z, BlockType::Sand);
@@ -53,8 +63,8 @@ public:
                     col->setBlock(x, h, z, BlockType::Grass);
                 }
 
-                // أشجار طبيعية
-                if (h > SEA_LEVEL + 2 && (hash2D(wx, wz) > 0.88f)) {
+                // 4. أشجار طبيعية
+                if (h > SEA_LEVEL + 2 && (hash2D(wx, wz, seed + 99) > 0.88f)) {
                     int ty = h + 1;
                     for (int y = 0; y < 5; ++y) col->setBlock(x, ty + y, z, BlockType::OakLog);
                     for (int ox = -2; ox <= 2; ++ox) {
@@ -77,21 +87,23 @@ public:
         int pcx = (int)std::floor(playerPos.x / (float)SECTION_SIZE);
         int pcz = (int)std::floor(playerPos.z / (float)SECTION_SIZE);
 
-        std::vector<ChunkColumn*> newCols;
-        for (int dx = -viewDistance; dx <= viewDistance; ++dx) {
-            for (int dz = -viewDistance; dz <= viewDistance; ++dz) {
-                int cx = pcx + dx, cz = pcz + dz;
-                uint64_t key = getChunkKey(cx, cz);
-                if (chunks.find(key) == chunks.end()) {
-                    generateColumnData(cx, cz);
-                    newCols.push_back(chunks[key].get());
-                }
+        // المرحلة 1: توليد بيانات البلوكات أولاً لكل الجيران بمحيط إضافي (+1)
+        // هذا يضمن أن الجار موجود دائماً قبل بناء أي جدار مائي!
+        for (int dx = -viewDistance - 1; dx <= viewDistance + 1; ++dx) {
+            for (int dz = -viewDistance - 1; dz <= viewDistance + 1; ++dz) {
+                generateColumnData(pcx + dx, pcz + dz);
             }
         }
 
-        // بناء المش بربط الجيران لمنع خطوط وفواصل الماء
-        for (auto* col : newCols) {
-            col->buildAllMeshes(this);
+        // المرحلة 2: بناء وتحديث المش بربط الأطراف بالتساوي التام لمنع الفواصل المائية من الطرفين!
+        for (int dx = -viewDistance; dx <= viewDistance; ++dx) {
+            for (int dz = -viewDistance; dz <= viewDistance; ++dz) {
+                uint64_t key = getChunkKey(pcx + dx, pcz + dz);
+                auto it = chunks.find(key);
+                if (it != chunks.end() && !it->second->isMeshed) {
+                    it->second->buildAllMeshes(this);
+                }
+            }
         }
     }
 
