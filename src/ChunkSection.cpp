@@ -132,7 +132,27 @@ void ChunkSection::buildMesh() {
                 BlockType block = getBlock(x, y, z);
                 if (block == BlockType::Air) continue;
 
+                // تحديد التكستشر الصحيح لكل بلوكة
                 int topTex = 0, sideTex = 1, bottomTex = 2;
+
+                switch (block) {
+                    case BlockType::Grass:
+                        topTex = 0;    // grass_block_top
+                        sideTex = 1;   // grass_block_side
+                        bottomTex = 2; // dirt
+                        break;
+                    case BlockType::Dirt:
+                        topTex = sideTex = bottomTex = 2; // dirt كامل
+                        break;
+                    case BlockType::Stone:
+                        topTex = sideTex = bottomTex = 3; // stone كامل
+                        break;
+                    case BlockType::OakLeaves:
+                        topTex = sideTex = bottomTex = 4; // oak_leaves كامل
+                        break;
+                    default:
+                        break;
+                }
 
                 if (isFaceVisible(x, y, z, DIR_UP))    addFace(vertices, x, y, z, DIR_UP, topTex);
                 if (isFaceVisible(x, y, z, DIR_DOWN))  addFace(vertices, x, y, z, DIR_DOWN, bottomTex);
