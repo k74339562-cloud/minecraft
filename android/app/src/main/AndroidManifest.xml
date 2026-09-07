@@ -8,7 +8,7 @@
         android:allowBackup="false"
         android:label="Minecraft Clone"
         android:hasCode="true"
-        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        android:theme="@style/GameTheme"
 
         <activity
             android:name=".MainActivity"
