@@ -1,7 +1,12 @@
 #pragma once
+
 #include <unordered_map>
 #include <memory>
 #include <vector>
+#include <cmath>
+#include <algorithm>
+#include <glm/glm.hpp> // حل مشكلة glm
+
 #include "ChunkColumn.hpp"
 #include "TerrainGenerator.hpp"
 
@@ -12,7 +17,7 @@ inline uint64_t getChunkKey(int cx, int cz) {
 class World {
 public:
     std::unordered_map<uint64_t, std::unique_ptr<ChunkColumn>> chunks;
-    const int viewDistance = 2; // شبكة 5x5 Chunks حول اللاعب
+    const int viewDistance = 2; // يولد شبكة 5x5 Chunks حول اللاعب
 
     void generateColumnData(int cx, int cz) {
         uint64_t key = getChunkKey(cx, cz);
@@ -72,7 +77,6 @@ public:
         int pcx = (int)std::floor(playerPos.x / (float)SECTION_SIZE);
         int pcz = (int)std::floor(playerPos.z / (float)SECTION_SIZE);
 
-        // 1. توليد البيانات للبلوكات أولاً
         std::vector<ChunkColumn*> newCols;
         for (int dx = -viewDistance; dx <= viewDistance; ++dx) {
             for (int dz = -viewDistance; dz <= viewDistance; ++dz) {
@@ -85,7 +89,7 @@ public:
             }
         }
 
-        // 2. بناء المش بربط الحدود مع الجيران لمنع خطوط وفواصل الماء
+        // بناء المش بربط الجيران لمنع خطوط وفواصل الماء
         for (auto* col : newCols) {
             col->buildAllMeshes(this);
         }
