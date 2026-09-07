@@ -6,16 +6,16 @@
 
     <application
         android:allowBackup="false"
-        android:label="Minecraft Clone"
+        android:label="MinecraftClone"
         android:hasCode="true"
-        android:theme="@style/GameTheme"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:screenOrientation="sensorLandscape">
-            
+
             <meta-data
                 android:name="android.app.lib_name"
                 android:value="MinecraftClone" />
