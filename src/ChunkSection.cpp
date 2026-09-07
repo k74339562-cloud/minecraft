@@ -48,10 +48,13 @@ bool ChunkSection::isFaceVisible(int x, int y, int z, Direction dir) const {
     BlockType neighbor = getBlock(nx, ny, nz);
 
     if (isBlockAir(neighbor)) return true;
-    if (isBlockOpaque(neighbor)) return false;
-    if (isBlockOpaque(current) && !isBlockOpaque(neighbor)) return true;
+    if (isBlockOpaque(neighbor)) return false; // الخشب والتراب والصخر يحجب ما خلفه تماماً
 
-    // حذف الوجه المشترك بين بلوكتين متطابقتين (يمنع تداخل أوراق الشجر والـ Z-Fighting نهائياً!)
+    // سر ماينكرافت Fancy: رسم الأوجه بين أوراق الشجر لتكون الشجرة ممتلئة بعمق حقيقي!
+    if (current == BlockType::OakLeaves && neighbor == BlockType::OakLeaves) {
+        return true;
+    }
+
     if (current == neighbor) return false;
 
     return true;
@@ -138,9 +141,7 @@ void ChunkSection::buildMesh() {
 
                 switch (block) {
                     case BlockType::Grass:
-                        topTex = 0;
-                        sideTex = 1;
-                        bottomTex = 2;
+                        topTex = 0; sideTex = 1; bottomTex = 2;
                         break;
                     case BlockType::Dirt:
                         topTex = sideTex = bottomTex = 2;
@@ -150,6 +151,10 @@ void ChunkSection::buildMesh() {
                         break;
                     case BlockType::OakLeaves:
                         topTex = sideTex = bottomTex = 4;
+                        break;
+                    case BlockType::OakLog:
+                        // خشب السنديان: السطح والقاع حلقات (طبقة 6)، والجوانب لحاء (طبقة 5)
+                        topTex = 6; bottomTex = 6; sideTex = 5;
                         break;
                     default:
                         break;
