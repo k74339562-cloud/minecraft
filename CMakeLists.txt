@@ -9,8 +9,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include_directories(
     include
     lib
+    lib/glad/include
     lib/glad
     lib/stb
+    lib/glm
 )
 
 # البحث عن مكتبة GLM أو استخدام المجلد الداخلي
