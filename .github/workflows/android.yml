@@ -19,7 +19,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # إيقاف كاش Gradle لحذف التحذيرات المزعجة
+      # إيقاف كاش Gradle
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
@@ -33,20 +33,23 @@ jobs:
         run: |
           sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
 
-      # تحميل مكتبة GLM تلقائياً في ثوانٍ
+      # تحميل مكتبة GLM
       - name: Download GLM Library
         run: |
           if [ ! -d "lib/glm" ]; then
             git clone --depth 1 https://github.com/g-truc/glm.git lib/glm
           fi
 
-      # تشغيل البناء مع إظهار الخطأ المباشر فقط بدون أي تشويش
+      # تشغيل البناء مع طباعة تقرير CMake بدقة إذا فشل
       - name: Build Android APK with Gradle
         run: |
           cd android
-          gradle assembleDebug --no-daemon --console=plain
+          if ! gradle assembleDebug --no-daemon --console=plain; then
+            echo "====================== EXACT CMAKE ERROR LOG ======================"
+            find app/.cxx -name "*output.txt" -exec cat {} + 2>/dev/null || true
+            exit 1
+          fi
 
-      # رفع ملف الـ APK النهائي
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
