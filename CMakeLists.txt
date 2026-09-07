@@ -1,11 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(MinecraftClone LANGUAGES C CXX)
 
-# فرض استخدام معيار C++20 الحديث
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# المجلدات المشتركة لملفات الترويسات (Headers)
+# مسارات الترويسات الشاملة لكل المكتبات
 include_directories(
     include
     lib
@@ -15,15 +14,7 @@ include_directories(
     lib/glm
 )
 
-# البحث عن مكتبة GLM أو استخدام المجلد الداخلي
-find_package(glm QUIET)
-if (glm_FOUND)
-    include_directories(${GLM_INCLUDE_DIRS})
-else()
-    include_directories(lib/glm)
-endif()
-
-# الملفات البرمجية المشتركة (المحرك الأساسي)
+# الملفات المشتركة للمحرك
 set(COMMON_SOURCES
     src/TextureArray.cpp
     src/Shader.cpp
@@ -34,34 +25,33 @@ set(COMMON_SOURCES
 # إعدادات البناء للأندرويد (Android NDK)
 # ==============================================================================
 if (ANDROID)
-    # التأكد التام من الحصول على مسار الـ NDK الداخلي
     if (NOT DEFINED ANDROID_NDK)
         set(ANDROID_NDK ${CMAKE_ANDROID_NDK})
     endif()
 
-    # تجميع كود الربط الخاص بـ NativeActivity من الـ NDK
+    # تجميع كود ربط أندرويد الداخلي مع مساراته
     add_library(app-glue STATIC
         ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c
     )
+    target_include_directories(app-glue PUBLIC
+        ${ANDROID_NDK}/sources/android/native_app_glue
+    )
 
-    # إنشاء المكتبة الديناميكية الأساسية للعبة (.so)
+    # تجميع ملفات اللعبة كـ Native Library للأندرويد
     add_library(${PROJECT_NAME} SHARED
         ${COMMON_SOURCES}
         src/android_main.cpp
     )
 
-    # مسار ترويسات android_native_app_glue
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${ANDROID_NDK}/sources/android/native_app_glue
     )
 
-    # البحث عن مكتبات النظام في الأندرويد
     find_library(LOG_LIB log)
     find_library(ANDROID_LIB android)
     find_library(EGL_LIB EGL)
     find_library(GLES3_LIB GLESv3)
 
-    # ربط المحرك بمكتبات الرسوميات والنظام
     target_link_libraries(${PROJECT_NAME}
         PRIVATE
         app-glue
@@ -81,7 +71,7 @@ else()
     add_executable(${PROJECT_NAME}
         ${COMMON_SOURCES}
         src/main.cpp
-        lib/glad/glad.c
+        lib/glad/src/glad.c
     )
 
     target_link_libraries(${PROJECT_NAME}
